@@ -11,7 +11,6 @@ import {
 import { useMeta } from '../hooks/useMeta';
 import { useToast } from '../hooks/useToast';
 import { useTranscriber, type FinishedRecording } from '../hooks/useTranscriber';
-import { useWorkspace } from '../hooks/useWorkspace';
 import { api, type EngineId, type EngineInfo } from '../lib/api';
 import { formatDuration, languageName } from '../lib/format';
 import { MicIcon, StopIcon } from './icons';
@@ -84,7 +83,6 @@ function EnginePicker({
 }
 
 export function Studio() {
-  const { key } = useWorkspace();
   const meta = useMeta();
   const notify = useToast();
   const queryClient = useQueryClient();
@@ -117,7 +115,7 @@ export function Studio() {
 
   const save = useMutation({
     mutationFn: (d: Draft) =>
-      api.createTranscript(key as string, {
+      api.createTranscript({
         title: d.title.trim() || undefined,
         text: d.text.trim(),
         engine: d.engine,
@@ -131,20 +129,19 @@ export function Studio() {
       t.clear();
       notify('Transcript saved');
       void queryClient.invalidateQueries({ queryKey: ['transcripts'] });
-      void queryClient.invalidateQueries({ queryKey: ['workspace'] });
     },
     onError: (err) => notify(err.message, 'error'),
   });
 
   const recording = t.status !== 'idle';
-  const canRecord = Boolean(key) && !draft;
+  const canRecord = !draft;
   const modes = meta.data?.modes ?? [];
   const activeMode = modes.find((m) => m.id === prefs.mode);
   const liveText = t.segments.map((s) => s.text).join(' ');
 
   function toggle() {
     if (recording) t.stop();
-    else if (key) void t.start({ key, ...settings });
+    else void t.start(settings);
   }
 
   function onSave(e: FormEvent) {

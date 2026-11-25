@@ -1,11 +1,7 @@
 import { History } from './components/History';
 import { Studio } from './components/Studio';
-import { WorkspaceBar } from './components/WorkspaceBar';
-import { useWorkspace } from './hooks/useWorkspace';
 
 export function App() {
-  const { problem, newWorkspace } = useWorkspace();
-
   return (
     <div className="shell">
       <header className="topbar">
@@ -24,21 +20,7 @@ export function App() {
             <p className="muted">Real-time speech to text · Sarvam API or self-hosted Whisper</p>
           </div>
         </div>
-        <WorkspaceBar />
       </header>
-
-      {problem && (
-        <div className="banner" role="alert">
-          <span>{problem}</span>
-          <button
-            type="button"
-            className="btn btn--sm"
-            onClick={() => void newWorkspace().catch(() => undefined)}
-          >
-            Start a new workspace
-          </button>
-        </div>
-      )}
 
       <main className="grid">
         <Studio />
@@ -48,7 +30,7 @@ export function App() {
       <footer className="footer muted">
         Audio goes through this server to the engine you pick: Sarvam’s API, or the open-source
         Whisper model running on this server. API keys never reach the browser. Transcripts are
-        stored in Postgres under your workspace key.
+        stored in Postgres in one shared history that everyone can see.
       </footer>
     </div>
   );

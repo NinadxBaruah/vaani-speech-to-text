@@ -4,7 +4,6 @@ import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { createDb } from './db/client.js';
 import { createTranscriptRepository } from './repositories/transcripts.js';
-import { createWorkspaceRepository } from './repositories/workspaces.js';
 import { createEngines } from './services/engines/index.js';
 import { createSarvamTts } from './services/sarvamTts.js';
 
@@ -13,7 +12,6 @@ const isProd = env.NODE_ENV === 'production';
 
 const app = await buildApp({
   repos: {
-    workspaces: createWorkspaceRepository(db),
     transcripts: createTranscriptRepository(db),
   },
   tts: createSarvamTts(env.SARVAM_API_KEY),
@@ -30,7 +28,7 @@ const app = await buildApp({
   trustProxy: isProd,
   logger: {
     level: env.LOG_LEVEL,
-    redact: ['req.headers.authorization', 'req.headers.cookie', '*.key'],
+    redact: ['req.headers.authorization', 'req.headers.cookie'],
     ...(isProd ? {} : { transport: { target: 'pino-pretty', options: { singleLine: true } } }),
   },
 });

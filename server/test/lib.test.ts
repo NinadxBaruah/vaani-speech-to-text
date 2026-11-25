@@ -1,48 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { withStrictSsl } from '../src/db/client.js';
-import {
-  generateWorkspaceKey,
-  hashWorkspaceKey,
-  isWellFormedKey,
-  keyDisplayPrefix,
-  parseBearer,
-} from '../src/lib/apiKey.js';
 import { titleFromText } from '../src/routes/transcripts.js';
 import {
   buildRealtimeUrl,
   describeUpstreamClose,
   normalizeSarvamEvent,
 } from '../src/services/sarvamRealtime.js';
-
-describe('workspace keys', () => {
-  it('generates unique, well-formed keys', () => {
-    const a = generateWorkspaceKey();
-    const b = generateWorkspaceKey();
-    expect(a).not.toBe(b);
-    expect(isWellFormedKey(a)).toBe(true);
-    expect(a.startsWith('stt_')).toBe(true);
-  });
-
-  it('rejects malformed keys', () => {
-    expect(isWellFormedKey('stt_short')).toBe(false);
-    expect(isWellFormedKey(`xyz_${'a'.repeat(43)}`)).toBe(false);
-    expect(isWellFormedKey('')).toBe(false);
-  });
-
-  it('hashes deterministically to 64 hex chars', () => {
-    const key = generateWorkspaceKey();
-    expect(hashWorkspaceKey(key)).toMatch(/^[0-9a-f]{64}$/);
-    expect(hashWorkspaceKey(key)).toBe(hashWorkspaceKey(key));
-    expect(keyDisplayPrefix(key)).toHaveLength(10);
-  });
-
-  it('parses bearer headers', () => {
-    expect(parseBearer('Bearer abc')).toBe('abc');
-    expect(parseBearer('bearer   abc ')).toBe('abc');
-    expect(parseBearer('Basic abc')).toBeNull();
-    expect(parseBearer(undefined)).toBeNull();
-  });
-});
 
 describe('sarvam realtime helpers', () => {
   it('builds the realtime URL with saaras:v4 and 16 kHz PCM', () => {

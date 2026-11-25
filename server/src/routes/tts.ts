@@ -1,8 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { DEFAULT_TTS_SPEAKER, TTS_LANGUAGE_CODES, TTS_SPEAKER_IDS } from '../lib/languages.js';
-import { requireWorkspace } from '../plugins/auth.js';
-import type { Repositories } from '../repositories/types.js';
 import type { TtsClient } from '../services/sarvamTts.js';
 
 const TtsBody = z.object({
@@ -11,14 +9,10 @@ const TtsBody = z.object({
   speaker: z.enum(TTS_SPEAKER_IDS).default(DEFAULT_TTS_SPEAKER),
 });
 
-export async function ttsRoutes(
-  app: FastifyInstance,
-  { repos, tts }: { repos: Repositories; tts: TtsClient },
-) {
+export async function ttsRoutes(app: FastifyInstance, { tts }: { tts: TtsClient }) {
   app.post(
     '/',
     {
-      preHandler: requireWorkspace(repos.workspaces),
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     },
     async (request, reply) => {

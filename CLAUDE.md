@@ -7,6 +7,7 @@ self-hosted Whisper engine) and `web/` (React + Vite), plus `stt-local/` (Python
 **Before doing anything, read `docs/PLAN.md`.** It holds the decisions, API/WS contracts,
 data model and the progress checklist. Tick the checklist and append to its session log as you work.
 
+- One shared transcript history, no auth (see PLAN §5). Commits: no Claude co-author/session trailers.
 - Secrets live in the root `.env` (`SARVAM_API_KEY`, `DB_URI`) — never print, commit or send them to the browser.
 - Self-hosted engine: `npm run stt-local` (Docker, :8001) + `LOCAL_STT_URL=http://localhost:8001 npm run dev`.
 - Dev: `npm run dev` (server :3000, web :5173 with proxy). Tests: `npm test` (unit/integration), `npm run test:e2e` (browser, app must be running).

@@ -13,8 +13,6 @@ export class HttpError extends Error {
 }
 
 export const notFound = (what = 'Resource') => new HttpError(404, 'not_found', `${what} not found`);
-export const unauthorized = (message = 'A valid workspace key is required') =>
-  new HttpError(401, 'unauthorized', message);
 export const badGateway = (message: string) => new HttpError(502, 'upstream_error', message);
 
 export function errorHandler(

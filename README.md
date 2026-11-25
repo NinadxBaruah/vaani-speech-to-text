@@ -22,7 +22,7 @@ delete, copy and listen back with text-to-speech.
 | ✍️ **Output styles**             | _Code-mix_ (`नमस्ते, कल की meeting 10 बजे है`), _Transcribe_, _Romanised_, _Translate to English_, _Verbatim_.                |
 | 🗂️ **History with full CRUD**    | Save (with an editable title/text), list newest first, search, paginate, edit inline, delete with confirmation.           |
 | 🔊 **Listen back**               | Text-to-speech (Sarvam `bulbul:v3`) for the 11 languages it supports.                                                     |
-| 🔑 **No sign-up**                | Each browser gets a **workspace key** automatically. Copy it into another browser to open the same history.               |
+| 🔑 **No sign-up**                | One **shared history** for everyone: open the site and start recording, nothing to create or log into.                    |
 
 Example, from the automated browser test (fake mic playing real Hinglish speech):
 
@@ -47,15 +47,12 @@ voice-activity detector (adaptive noise floor, pre-roll, 700 ms end-of-speech, 1
 for a fast greedy preview while you talk and a beam-search final when you pause. The sidecar converts the
 **official** model weights (pinned commit) to CTranslate2 int8 at image build time; no third-party conversions.
 
-## How the "no account" workspace key works
+## Shared history, no accounts
 
-The reviewer shouldn't have to sign up, so there are no accounts:
-
-1. On first visit the app calls `POST /api/workspaces` and gets a random key (`stt_` + 256 bits).
-2. The key lives in the browser's `localStorage` and is sent as `Authorization: Bearer <key>`.
-3. The server stores **only a SHA-256 hash** of the key. Every query is scoped to that workspace, so one
-   key can never read or change another key's transcripts (you get a 404).
-4. The key chip (top right) shows it, copies it, opens another workspace from a pasted key, or starts a fresh one.
+There is no sign-up and no key: everyone who opens the site sees and manages the **same** transcript
+history, so a reviewer can try it instantly and see what others saved. The list refreshes itself every
+20 seconds. The trade-off is deliberate for a demo: anyone with the URL can edit or delete entries.
+Abuse is limited by per-IP rate limits, size limits, session length caps and strict input validation.
 
 ## Architecture
 
@@ -70,7 +67,7 @@ TanStack Query ──────── REST ───────────�
 ```
 
 - **The Sarvam API key never reaches the browser.** Audio goes through our WebSocket proxy, which also
-  enforces the workspace key, frame-size limits, a start timeout and a maximum session length.
+  enforces frame-size limits, a start timeout and a maximum session length.
 - The browser asks for the microphone **before** opening the socket, so a denied permission never starts
   a paid upstream session.
 - One process, one port, one origin: simple to deploy and no CORS.
@@ -111,7 +108,7 @@ NODE_ENV=production npm start # runs migrations, then serves everything on http:
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run dev`                                           | Server (tsx watch) + Vite dev server with `/api` proxy (incl. WebSocket)                                                                                                        |
 | `npm run build` / `npm start`                           | Production build / migrate + serve                                                                                                                                              |
-| `npm test`                                              | 34 server tests (Vitest): CRUD, workspace isolation, validation, the voice segmenter, and the WS proxy for both engines against fake Sarvam / sidecar servers                   |
+| `npm test`                                              | 28 server tests (Vitest): CRUD, validation, pagination, the voice segmenter, and the WS proxy for both engines against fake Sarvam / sidecar servers                            |
 | `npm run test:e2e`                                      | Headless Chromium with a **fake microphone** playing real speech: record → save → edit → listen → search → delete (`npx playwright install chromium` once; app must be running) |
 | `npm run smoke:stt -w server`                           | Streams synthesised speech through the live WS and prints every event                                                                                                           |
 | `npm run typecheck` / `npm run lint` / `npm run format` | TypeScript, ESLint (incl. React hooks rules), Prettier                                                                                                                          |
@@ -119,22 +116,20 @@ NODE_ENV=production npm start # runs migrations, then serves everything on http:
 
 ## API
 
-All JSON under `/api`. Authenticated routes need `Authorization: Bearer <workspace key>`.
+All JSON under `/api`. No authentication (one shared history).
 Errors look like `{ "error": { "code": "validation_error", "message": "…" } }`.
 
-| Method   | Path                                 | Notes                                                                                                                                                                                |
-| -------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET`    | `/api/health`                        | DB check                                                                                                                                                                             |
-| `GET`    | `/api/meta`                          | Languages, output modes, TTS voices (the UI reads these from here)                                                                                                                   |
-| `POST`   | `/api/workspaces`                    | Creates a workspace, returns its key once (rate-limited)                                                                                                                             |
-| `GET`    | `/api/workspaces/me`                 | Current workspace + transcript count                                                                                                                                                 |
-| `GET`    | `/api/transcripts?q=&limit=&offset=` | Newest first, case-insensitive search in title and text                                                                                                                              |
-| `GET`    | `/api/transcripts/:id`               |                                                                                                                                                                                      |
-| `POST`   | `/api/transcripts`                   | `{ text, title?, languageCode?, detectedLanguages?, mode?, durationMs? }`                                                                                                            |
-| `PATCH`  | `/api/transcripts/:id`               | `{ title?, text? }`                                                                                                                                                                  |
-| `DELETE` | `/api/transcripts/:id`               | `204`                                                                                                                                                                                |
-| `POST`   | `/api/tts`                           | `{ text, languageCode, speaker? }` → `audio/wav`                                                                                                                                     |
-| `WS`     | `/api/transcribe`                    | `{type:"start", key, languageCode, mode}`, then binary PCM16 16 kHz frames, then `{type:"stop"}`. Server sends `ready / partial / final / speech_start / speech_end / error / ended` |
+| Method   | Path                                 | Notes                                                                                                                                                                                   |
+| -------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/health`                        | DB check                                                                                                                                                                                |
+| `GET`    | `/api/meta`                          | Languages, output modes, TTS voices (the UI reads these from here)                                                                                                                      |
+| `GET`    | `/api/transcripts?q=&limit=&offset=` | Newest first, case-insensitive search in title and text                                                                                                                                 |
+| `GET`    | `/api/transcripts/:id`               |                                                                                                                                                                                         |
+| `POST`   | `/api/transcripts`                   | `{ text, title?, languageCode?, detectedLanguages?, mode?, durationMs? }`                                                                                                               |
+| `PATCH`  | `/api/transcripts/:id`               | `{ title?, text? }`                                                                                                                                                                     |
+| `DELETE` | `/api/transcripts/:id`               | `204`                                                                                                                                                                                   |
+| `POST`   | `/api/tts`                           | `{ text, languageCode, speaker? }` → `audio/wav`                                                                                                                                        |
+| `WS`     | `/api/transcribe`                    | `{type:"start", engine, languageCode, mode}`, then binary PCM16 16 kHz frames, then `{type:"stop"}`. Server sends `ready / partial / final / speech_start / speech_end / error / ended` |
 
 The full contract, close codes and data model are in [`docs/PLAN.md`](docs/PLAN.md).
 
@@ -152,13 +147,13 @@ docs/     PLAN.md: decisions, contracts, progress log
 ## Engineering notes
 
 - **Validation everywhere:** zod for env, request bodies, query strings and WebSocket messages.
-- **Security:** hashed workspace keys, per-workspace scoping (404s, not 403s), Helmet with a strict CSP,
-  a `Permissions-Policy` that allows only the microphone, rate limits (global, workspace creation, TTS, WS),
-  body/frame size limits, secrets redacted from logs, LIKE wildcards escaped in search.
+- **Security:** Helmet with a strict CSP, a `Permissions-Policy` that allows only the microphone, rate
+  limits (global, TTS, live sessions), body/frame size limits, secrets redacted from logs, LIKE wildcards
+  escaped in search, provider keys kept server-side.
 - **Testability:** `buildApp(deps)` takes repository interfaces, the TTS client and the upstream URL, so
   tests use in-memory fakes and a fake Sarvam WebSocket server, with no network or DB needed.
 - **Database:** Drizzle migrations are committed SQL and run on start. There is an index on
-  `(workspace_id, created_at desc)` for the history list. TLS to Postgres is pinned to `verify-full`.
+  `created_at desc` for the history list. TLS to Postgres is pinned to `verify-full`.
 - **Audio:** an AudioWorklet downsamples to 16 kHz mono PCM16 in 100 ms frames. Audio sent while the
   upstream is still connecting is buffered (up to 5 s) so the first words aren't lost.
 - **UX:** live partials in grey, finals in black, an editable draft before saving, empty/loading/error
@@ -175,8 +170,8 @@ docs/     PLAN.md: decisions, contracts, progress log
   stateless and only reachable on the internal Docker network.
 - **TTS** uses Sarvam `bulbul:v3` for natural Indian voices. An open-source model (e.g. Piper/IndicTTS) could
   sit behind the same `TtsClient` interface.
-- **Workspace key vs. accounts:** zero friction for reviewers. Whoever holds the key has full access to that
-  workspace, which is acceptable for a demo; real accounts would replace `requireWorkspace` with session auth.
+- **Shared history vs. accounts:** zero friction for reviewers and one place to see everything that was
+  transcribed. Real accounts would add an auth hook in front of the transcript routes.
 - **Partial transcripts** come from the model's fast path and may look different (e.g. romanised) until the
   final transcript for that utterance arrives in the chosen output style.
 - **HTTPS is required in production:** browsers only allow the microphone on `https://` or `localhost`.

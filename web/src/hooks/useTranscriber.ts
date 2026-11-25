@@ -137,12 +137,10 @@ export function useTranscriber(onFinished: (recording: FinishedRecording) => voi
 
   const start = useCallback(
     async ({
-      key,
       engine,
       languageCode,
       mode,
     }: {
-      key: string;
       engine: string;
       languageCode: string;
       mode: string;
@@ -184,7 +182,7 @@ export function useTranscriber(onFinished: (recording: FinishedRecording) => voi
 
       const ws = new WebSocket(socketUrl());
       wsRef.current = ws;
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'start', key, engine, languageCode, mode }));
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'start', engine, languageCode, mode }));
       ws.onmessage = (e: MessageEvent<string>) => {
         try {
           handleEvent(JSON.parse(e.data) as ServerEvent);

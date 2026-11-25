@@ -1,6 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
-import { useWorkspace } from '../hooks/useWorkspace';
 import { api } from '../lib/api';
 import { SearchIcon } from './icons';
 import { TranscriptItem } from './TranscriptItem';
@@ -8,7 +7,6 @@ import { TranscriptItem } from './TranscriptItem';
 const PAGE_SIZE = 10;
 
 export function History() {
-  const { key } = useWorkspace();
   const ids = useId();
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -24,15 +22,17 @@ export function History() {
   }, [search]);
 
   const list = useQuery({
-    queryKey: ['transcripts', key, query, page],
+    queryKey: ['transcripts', query, page],
     queryFn: () =>
-      api.listTranscripts(key as string, {
+      api.listTranscripts({
         q: query || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       }),
-    enabled: Boolean(key),
     placeholderData: keepPreviousData,
+    // Shared history: pick up what other people save without a manual refresh.
+    refetchInterval: 20_000,
+    refetchOnWindowFocus: true,
   });
 
   const total = list.data?.total ?? 0;
@@ -48,7 +48,7 @@ export function History() {
         <div>
           <h2 id={`${ids}-title`}>History</h2>
           <p className="muted">
-            {total} saved transcript{total === 1 ? '' : 's'}
+            {total} saved transcript{total === 1 ? '' : 's'} · shared with everyone
           </p>
         </div>
       </header>

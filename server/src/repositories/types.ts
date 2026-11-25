@@ -1,11 +1,5 @@
 /** Repository contracts. Routes depend on these, so tests can swap in in-memory fakes. */
 
-export interface Workspace {
-  id: string;
-  keyPrefix: string;
-  createdAt: Date;
-}
-
 export interface Transcript {
   id: string;
   title: string;
@@ -40,25 +34,14 @@ export interface ListTranscriptsInput {
   offset: number;
 }
 
-export interface WorkspaceRepository {
-  create(keyHash: string, keyPrefix: string): Promise<Workspace>;
-  /** Finds the workspace for a key hash and bumps its last-used time. */
-  findByKeyHash(keyHash: string): Promise<Workspace | null>;
-}
-
 export interface TranscriptRepository {
-  list(
-    workspaceId: string,
-    input: ListTranscriptsInput,
-  ): Promise<{ items: Transcript[]; total: number }>;
-  get(workspaceId: string, id: string): Promise<Transcript | null>;
-  create(workspaceId: string, input: CreateTranscriptInput): Promise<Transcript>;
-  update(workspaceId: string, id: string, input: UpdateTranscriptInput): Promise<Transcript | null>;
-  delete(workspaceId: string, id: string): Promise<boolean>;
-  count(workspaceId: string): Promise<number>;
+  list(input: ListTranscriptsInput): Promise<{ items: Transcript[]; total: number }>;
+  get(id: string): Promise<Transcript | null>;
+  create(input: CreateTranscriptInput): Promise<Transcript>;
+  update(id: string, input: UpdateTranscriptInput): Promise<Transcript | null>;
+  delete(id: string): Promise<boolean>;
 }
 
 export interface Repositories {
-  workspaces: WorkspaceRepository;
   transcripts: TranscriptRepository;
 }

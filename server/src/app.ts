@@ -11,7 +11,6 @@ import { metaRoutes } from './routes/meta.js';
 import { transcribeRoutes } from './routes/transcribe.js';
 import { transcriptRoutes } from './routes/transcripts.js';
 import { ttsRoutes } from './routes/tts.js';
-import { workspaceRoutes } from './routes/workspaces.js';
 import type { Engines } from './services/engines/index.js';
 import type { TtsClient } from './services/sarvamTts.js';
 
@@ -67,12 +66,10 @@ export async function buildApp(deps: AppDeps) {
     async (api) => {
       await api.register(healthRoutes, { prefix: '/health', checkDb: deps.checkDb });
       await api.register(metaRoutes, { prefix: '/meta', engines: deps.engines });
-      await api.register(workspaceRoutes, { prefix: '/workspaces', repos: deps.repos });
       await api.register(transcriptRoutes, { prefix: '/transcripts', repos: deps.repos });
-      await api.register(ttsRoutes, { prefix: '/tts', repos: deps.repos, tts: deps.tts });
+      await api.register(ttsRoutes, { prefix: '/tts', tts: deps.tts });
       await api.register(transcribeRoutes, {
         prefix: '/transcribe',
-        repos: deps.repos,
         engines: deps.engines.factories,
         maxSessionSeconds: deps.maxSessionSeconds,
       });

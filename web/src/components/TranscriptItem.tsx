@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMeta } from '../hooks/useMeta';
 import { useToast } from '../hooks/useToast';
-import { useWorkspace } from '../hooks/useWorkspace';
 import { api, type Language, type Transcript } from '../lib/api';
 import { formatDate, formatDuration, languageName } from '../lib/format';
 import { CopyIcon, EditIcon, PlayIcon, StopIcon, TrashIcon } from './icons';
@@ -16,7 +15,6 @@ function ttsLanguageFor(t: Transcript, ttsLanguages: Language[] | undefined): st
 }
 
 export function TranscriptItem({ transcript }: { transcript: Transcript }) {
-  const { key } = useWorkspace();
   const meta = useMeta();
   const notify = useToast();
   const queryClient = useQueryClient();
@@ -31,12 +29,11 @@ export function TranscriptItem({ transcript }: { transcript: Transcript }) {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['transcripts'] });
-    void queryClient.invalidateQueries({ queryKey: ['workspace'] });
   };
 
   const update = useMutation({
     mutationFn: () =>
-      api.updateTranscript(key as string, transcript.id, {
+      api.updateTranscript(transcript.id, {
         title: title.trim(),
         text: text.trim(),
       }),
@@ -49,7 +46,7 @@ export function TranscriptItem({ transcript }: { transcript: Transcript }) {
   });
 
   const remove = useMutation({
-    mutationFn: () => api.deleteTranscript(key as string, transcript.id),
+    mutationFn: () => api.deleteTranscript(transcript.id),
     onSuccess: () => {
       notify('Transcript deleted');
       refresh();
@@ -63,7 +60,7 @@ export function TranscriptItem({ transcript }: { transcript: Transcript }) {
   const ttsLanguage = ttsLanguageFor(transcript, meta.data?.ttsLanguages);
   const speak = useMutation({
     mutationFn: () =>
-      api.speak(key as string, {
+      api.speak({
         text: transcript.text.slice(0, 2500),
         languageCode: ttsLanguage as string,
       }),

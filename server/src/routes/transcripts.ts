@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { STT_LANGUAGE_CODES, STT_MODE_IDS } from '../lib/languages.js';
 import { notFound } from '../lib/errors.js';
 import { ENGINE_IDS } from '../services/engines/types.js';
-import { currentWorkspace, requireWorkspace } from '../plugins/auth.js';
 import type { Repositories } from '../repositories/types.js';
 
 const MAX_TEXT = 20_000;
@@ -52,23 +51,21 @@ export function titleFromText(text: string): string {
 }
 
 export async function transcriptRoutes(app: FastifyInstance, { repos }: { repos: Repositories }) {
-  app.addHook('preHandler', requireWorkspace(repos.workspaces));
-
   app.get('/', async (request) => {
     const query = ListQuery.parse(request.query);
-    return repos.transcripts.list(currentWorkspace(request).id, query);
+    return repos.transcripts.list(query);
   });
 
   app.get('/:id', async (request) => {
     const { id } = IdParams.parse(request.params);
-    const transcript = await repos.transcripts.get(currentWorkspace(request).id, id);
+    const transcript = await repos.transcripts.get(id);
     if (!transcript) throw notFound('Transcript');
     return transcript;
   });
 
   app.post('/', async (request, reply) => {
     const body = CreateBody.parse(request.body);
-    const transcript = await repos.transcripts.create(currentWorkspace(request).id, {
+    const transcript = await repos.transcripts.create({
       title: body.title || titleFromText(body.text),
       text: body.text,
       languageCode: body.languageCode ?? null,
@@ -83,14 +80,14 @@ export async function transcriptRoutes(app: FastifyInstance, { repos }: { repos:
   app.patch('/:id', async (request) => {
     const { id } = IdParams.parse(request.params);
     const body = UpdateBody.parse(request.body);
-    const transcript = await repos.transcripts.update(currentWorkspace(request).id, id, body);
+    const transcript = await repos.transcripts.update(id, body);
     if (!transcript) throw notFound('Transcript');
     return transcript;
   });
 
   app.delete('/:id', async (request, reply) => {
     const { id } = IdParams.parse(request.params);
-    const deleted = await repos.transcripts.delete(currentWorkspace(request).id, id);
+    const deleted = await repos.transcripts.delete(id);
     if (!deleted) throw notFound('Transcript');
     return reply.status(204).send();
   });

@@ -18,8 +18,8 @@
 - **TypeScript** everywhere.
 - Use **Sarvam AI** (key in `.env` as `SARVAM_API_KEY`) and **Neon Postgres** (`DB_URI` in `.env`).
 - Support **every language the latest Sarvam STT model supports**, not just Hindi/English.
-- **No sign-up / login.** Use a "workspace key" so a reviewer can save, edit and delete
-  without creating an account.
+- **No sign-up / login.** (2026-11-25) One **shared history** everybody sees; originally per-browser
+  "workspace keys", removed in Phase 8.
 - Follow best practices. Build and run **locally first**; EC2 deploy comes after.
 - (2026-11-25) The UI must offer **two STT engines**: the third-party API (Sarvam) **or** a
   **self-hosted open-source model**, [`Oriserve/Whisper-Hindi2Hinglish-Swift`](https://huggingface.co/Oriserve/Whisper-Hindi2Hinglish-Swift).
@@ -36,7 +36,7 @@
 | Validation         | **zod** (env, request bodies, WS messages)                                                                    | One validation library everywhere                                                       |
 | Frontend           | **React 19 + Vite** + **TanStack Query**                                                                      | Standard, fast dev server, cache/invalidation for CRUD                                  |
 | Styling            | Hand-written CSS (no UI kit), light + dark via `prefers-color-scheme`                                         | Small bundle, looks deliberate                                                          |
-| Auth               | **Workspace key** (no accounts) — see section 5                                                               | Owner's requirement                                                                     |
+| Auth               | **None, one shared history** (section 5); per-browser workspace keys until Phase 8                            | Owner's requirement: reviewers share one space                                          |
 | TTS (bonus)        | Sarvam **`bulbul:v3`** via REST `/text-to-speech`, proxied by our server                                      | "Listen" button on a saved transcript                                                   |
 | Deploy shape       | One Node process serves the API, the WS and the built SPA (`web/dist`)                                        | One port, one origin → easy on EC2 behind Caddy/nginx with TLS                          |
 | TypeScript version | `~6.0.3` (not 7.x)                                                                                            | `typescript-eslint` peer range is `<6.1.0`                                              |
@@ -76,72 +76,63 @@ body `{ text (≤2500 chars), target_language_code, speaker, model: "bulbul:v3" 
 Browser (React)                         Node server (Fastify)                    External
 ──────────────                          ─────────────────────                    ────────
 mic → AudioWorklet (downsample to       WS  /api/transcribe  ── proxy ──────────▶ Sarvam realtime STT
-16 kHz PCM16, 100 ms frames) ──binary──▶   (auth by workspace key in the
+16 kHz PCM16, 100 ms frames) ──binary──▶   (engine chosen in the
                          ◀──JSON events──   first "start" message)
 TanStack Query ──REST /api/*──────────▶ routes → repositories → Drizzle ──────▶ Neon Postgres
 "Listen" button ──POST /api/tts──────▶ Sarvam TTS proxy ─────────────────────▶ Sarvam bulbul:v3
                                         In prod also serves web/dist (SPA fallback)
 ```
 
-## 5. Workspace key (the "no account" auth)
+## 5. Shared history (no accounts, no keys)
 
-- On first visit the SPA calls `POST /api/workspaces` → server creates a workspace and returns a
-  random key **once**: `stt_` + 32 random bytes base64url.
-- Server stores only **SHA-256(key)** (`key_hash`, unique) and a short `key_prefix` for display. Never the key.
-- SPA keeps the key in `localStorage` and sends `Authorization: Bearer <key>` on every REST call;
-  the WS sends it inside the first `start` message (browsers can't set WS headers, and keys in URLs end up in logs).
-- UI (`WorkspaceBar`): key chip with transcript count; panel shows the key masked with Show / Copy,
-  "Open another workspace" (paste a key, validated via `/me` before switching) and "Start a new empty workspace".
-- If a stored key returns 401 (e.g. DB was reset) the app shows a banner instead of silently replacing the key.
-- All transcript queries are scoped by `workspace_id` — one key can never read another key's data (return 404, not 403).
+> Changed 2026-11-25 (Phase 8). Originally every browser got its own "workspace key"; the owner asked for
+> **one shared history that everybody sees**. The workspace concept was removed entirely.
+
+- There is no auth: anyone with the URL can create, read, edit and delete transcripts. This is deliberate
+  for the demo/reviewer use case.
+- Abuse limits that remain: global rate limit 300 req/min/IP, WS sessions 30/min/IP, TTS 30/min/IP,
+  max live session `MAX_SESSION_SECONDS`, body/frame size caps, zod validation everywhere.
+- Migration `0002` moved every existing transcript into the shared history, dropped `transcripts.workspace_id`
+  and the `workspaces` table, and indexes `created_at desc` instead.
 
 ## 6. Data model (Postgres, via Drizzle)
 
 ```
-workspaces
-  id            uuid pk default gen_random_uuid()
-  key_hash      char(64) not null unique
-  key_prefix    varchar(16) not null
-  created_at    timestamptz not null default now()
-  last_used_at  timestamptz not null default now()
-
 transcripts
   id                  uuid pk default gen_random_uuid()
-  workspace_id        uuid not null → workspaces.id on delete cascade
   title               varchar(200) not null
   text                text not null           (max 20 000 chars, checked by zod)
-  language_code       varchar(16)             (the language the user picked, or 'auto')
+  language_code       varchar(16)             (the language the user picked, 'auto', or null for the local engine)
   detected_languages  text[] not null default '{}'   (languages Sarvam reported per utterance)
+  engine              varchar(16) not null default 'sarvam'   ('sarvam' | 'local')
   mode                varchar(16) not null default 'transcribe'
   duration_ms         integer                 (recording length)
   created_at          timestamptz not null default now()
   updated_at          timestamptz not null default now()
-  index (workspace_id, created_at desc)
+  index (created_at desc)
 ```
 
 ## 7. HTTP API contract (all JSON, prefix `/api`)
 
-| Method & path                 | Auth                     | Body / query                                                              | Response                                                                                                                 |
-| ----------------------------- | ------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| GET `/api/health`             | –                        | –                                                                         | `{ ok, db }`                                                                                                             |
-| GET `/api/meta`               | –                        | –                                                                         | `{ sttModel, autoLanguage, sttLanguages[], ttsLanguages[], modes[], ttsSpeakers[] }` (single source of truth for the UI) |
-| POST `/api/workspaces`        | – (rate-limited 10/h/IP) | –                                                                         | `201 { key, workspace: { id, keyPrefix, createdAt } }`                                                                   |
-| GET `/api/workspaces/me`      | Bearer                   | –                                                                         | `{ id, keyPrefix, createdAt, transcriptCount }`                                                                          |
-| GET `/api/transcripts`        | Bearer                   | `?q=&limit=20&offset=0` (q = case-insensitive search in title+text)       | `{ items[], total }` newest first                                                                                        |
-| GET `/api/transcripts/:id`    | Bearer                   | –                                                                         | transcript                                                                                                               |
-| POST `/api/transcripts`       | Bearer                   | `{ title?, text, languageCode?, detectedLanguages?, mode?, durationMs? }` | `201` transcript (title defaults to first words of text)                                                                 |
-| PATCH `/api/transcripts/:id`  | Bearer                   | `{ title?, text? }` (at least one)                                        | transcript                                                                                                               |
-| DELETE `/api/transcripts/:id` | Bearer                   | –                                                                         | `204`                                                                                                                    |
-| POST `/api/tts`               | Bearer (30/min)          | `{ text, languageCode, speaker? }`                                        | `audio/wav` bytes                                                                                                        |
+| Method & path                 | Auth       | Body / query                                                              | Response                                                                                                                 |
+| ----------------------------- | ---------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| GET `/api/health`             | –          | –                                                                         | `{ ok, db }`                                                                                                             |
+| GET `/api/meta`               | –          | –                                                                         | `{ sttModel, autoLanguage, sttLanguages[], ttsLanguages[], modes[], ttsSpeakers[] }` (single source of truth for the UI) |
+| GET `/api/transcripts`        | –          | `?q=&limit=20&offset=0` (q = case-insensitive search in title+text)       | `{ items[], total }` newest first                                                                                        |
+| GET `/api/transcripts/:id`    | –          | –                                                                         | transcript                                                                                                               |
+| POST `/api/transcripts`       | –          | `{ title?, text, languageCode?, detectedLanguages?, mode?, durationMs? }` | `201` transcript (title defaults to first words of text)                                                                 |
+| PATCH `/api/transcripts/:id`  | –          | `{ title?, text? }` (at least one)                                        | transcript                                                                                                               |
+| DELETE `/api/transcripts/:id` | –          | –                                                                         | `204`                                                                                                                    |
+| POST `/api/tts`               | – (30/min) | `{ text, languageCode, speaker? }`                                        | `audio/wav` bytes                                                                                                        |
 
-Errors: `{ error: { code, message } }` with proper status (400 validation incl. non-UUID ids, 401 missing/bad key,
-404 not found or another workspace's row, 429 rate limit, 502 upstream). Global rate limit 300/min/IP.
+Errors: `{ error: { code, message } }` with proper status (400 validation incl. non-UUID ids,
+404 not found, 429 rate limit, 502 upstream). Global rate limit 300/min/IP.
 
 ## 8. Live transcription WS protocol (`/api/transcribe`)
 
 Client → server
 
-1. Text `{ "type":"start", "key":"stt_…", "engine":"sarvam"|"local", "languageCode":"auto"|"hi-IN"|…, "mode":"codemix"|… }`
+1. Text `{ "type":"start", "engine":"sarvam"|"local", "languageCode":"auto"|"hi-IN"|…, "mode":"codemix"|… }`
    — must arrive within 10 s. `engine` defaults to `sarvam`; the local engine ignores language/mode.
 2. Binary frames: PCM16LE, mono, 16 kHz, ~100 ms each (≤ 64 KB per frame).
 3. Text `{ "type":"stop" }` → server sends `flush` then `end` upstream, waits for `session.end`, then closes.
@@ -152,7 +143,7 @@ Server → client (JSON text)
 `{type:"error", message, fatal}`, `{type:"ended", audioDurationS?}`.
 
 Close codes: `1000` normal (after `ended`), `4400` invalid message / bad audio frame (must be PCM16, ≤ 64 KB),
-`4401` bad workspace key, `4408` no `start` within 10 s, `4502` engine failed (Sarvam closed / sidecar down),
+`4408` no `start` within 10 s, `4502` engine failed (Sarvam closed / sidecar down),
 `4503` engine not enabled on this server (e.g. `LOCAL_STT_URL` unset).
 
 Limits: one upstream session per socket, max session `MAX_SESSION_SECONDS` (default 600, then a non-fatal
@@ -178,15 +169,13 @@ server/
   src/db/schema.ts            Drizzle tables
   src/db/client.ts            pg Pool + drizzle; withStrictSsl() pins sslmode=verify-full (silences pg warning)
   src/db/migrate.ts           runs migrations in server/drizzle (npm start runs it first)
-  src/lib/apiKey.ts           generate / hash / parse workspace keys
   src/lib/languages.ts        STT/TTS language + mode + speaker lists
   src/lib/errors.ts           HttpError + Fastify error handler (zod → 400)
   src/repositories/types.ts   repository interfaces (routes depend on these)
-  src/repositories/{workspaces,transcripts}.ts   Drizzle implementations
+  src/repositories/transcripts.ts   Drizzle implementation
   src/services/sarvamTts.ts   TTS REST call
   src/services/sarvamRealtime.ts  upstream WS URL builder + event normaliser + close-code text
-  src/plugins/auth.ts         Bearer → workspace (request.workspace); resolveWorkspace() also used by the WS
-  src/routes/{health,meta,workspaces,transcripts,tts,transcribe}.ts
+  src/routes/{health,meta,transcripts,tts,transcribe}.ts
   src/app.ts                  buildApp(deps): helmet/CSP, rate limit, routes, SPA static + fallback; no listen
   src/index.ts                wires real deps, listen + graceful shutdown
   test/fakes.ts               in-memory repos + buildTestApp()
@@ -196,15 +185,12 @@ server/
 web/
   index.html, vite.config.ts (proxy /api incl. ws → :3000), public/favicon.svg
   public/pcm-processor.js     AudioWorklet: box-filter downsample → Int16 → 100 ms frames + RMS level
-  src/lib/api.ts              typed fetch client (adds Bearer, parses { error })
-  src/lib/workspaceKey.ts     localStorage get/set/mask
+  src/lib/api.ts              typed fetch client (parses { error })
   src/lib/recorder.ts         getUserMedia + AudioContext + worklet; friendly mic-permission errors
   src/lib/format.ts           date / duration / language-name helpers
-  src/hooks/useWorkspace.tsx  WorkspaceProvider context: creates key on first visit, switch / new workspace
   src/hooks/useTranscriber.ts WS session state machine (idle → connecting → live → stopping → idle)
-  src/hooks/useMeta.ts        GET /api/meta (cached forever)
+  src/hooks/useMeta.ts        GET /api/meta (refreshed every 60 s: engine availability)
   src/hooks/useToast.tsx      tiny toast context (aria-live)
-  src/components/WorkspaceBar.tsx    key chip + panel
   src/components/Studio.tsx          language/mode pickers, record button + level ring, live text, save/discard draft
   src/components/History.tsx         debounced search, list, pagination, empty/loading/error states
   src/components/TranscriptItem.tsx  view / inline edit / delete confirm / copy / listen (TTS)
@@ -218,6 +204,7 @@ stt-local/                    Python sidecar: app/main.py (FastAPI + faster-whis
 server/src/services/engines/  types.ts (EngineSession), index.ts (createEngines + /api/meta status),
                               sarvam.ts, localWhisper.ts (+ HTTP client, cached health), segmenter.ts (VAD)
 server/drizzle/0001_*.sql     adds transcripts.engine (applied to Neon 2026-11-25)
+server/drizzle/0002_*.sql     drops workspaces + transcripts.workspace_id (shared history, applied 2026-11-25)
 ```
 
 ## 13. Self-hosted engine (Phase 7) — design
@@ -341,6 +328,14 @@ Browser ──WS /api/transcribe {engine:"local"}──▶ Node: LocalWhisperSes
 - [x] GitHub repo created and pushed (see README / git remote)
 - [x] EC2 deployed: https://vaani.myonlineclipboard.com (Let's Encrypt cert, valid to 2027-02-23); README updated
 
+### Phase 8 — one shared history (section 5)
+
+- [x] Migration 0002: drop `workspace_id` + `workspaces` (keep all transcripts), index `created_at desc`
+- [x] Server: remove apiKey/auth/workspace routes+repo; transcripts/TTS/WS without keys
+- [x] Web: remove WorkspaceBar/useWorkspace/workspaceKey; API client without keys; "shared" note in History
+- [x] Tests + E2E updated (E2E can't assume an empty history any more)
+- [x] Docs (README, PLAN 6/7/8/9), push, redeploy EC2
+
 ### Phase 7 — self-hosted engine (section 13)
 
 - [x] `stt-local/` FastAPI + faster-whisper service, Dockerfile (convert official weights, pinned)
@@ -357,7 +352,7 @@ Browser ──WS /api/transcribe {engine:"local"}──▶ Node: LocalWhisperSes
   `LOCAL_STT_URL=http://localhost:8001 npm run dev`. E2E per engine: `ENGINE=local npm run test:e2e`.
 
 - ESM everywhere (`"type": "module"`); server imports use `.js` suffixes (NodeNext).
-- No secrets in code, logs or the client bundle. Logger redacts `authorization` and `key`.
+- No secrets in code, logs or the client bundle. Logger redacts `authorization` and cookies.
 - Validate every input with zod at the edge; repositories trust their inputs.
 - Keep `docs/PLAN.md` updated when a decision or contract changes.
 - Only commit, push or deploy when the owner asks (nothing is committed yet — `git status` shows all work).
@@ -394,3 +389,7 @@ Browser ──WS /api/transcribe {engine:"local"}──▶ Node: LocalWhisperSes
 - 2026-11-25 — Security group opened; Caddy got the Let's Encrypt cert. Browser E2E passes against the LIVE
   site for both engines (Sarvam: Devanagari+English code-mix; local: "Namaste, kal ki meeting das baje hai, ...").
   Code committed and pushed to GitHub. The server copy in ~/vaani is still the uploaded tarball, not a git clone.
+- 2026-11-25 — Phase 8: one shared history. Removed workspace keys end to end (server auth/routes/repo,
+  web WorkspaceBar/hooks). Migration 0002 applied to Neon (5 transcripts kept). 28 server tests pass; browser
+  E2E passes on both engines (E2E now uses a unique title per run since the history is shared).
+  Commit trailers: owner wants NO Claude co-author lines; the first commit was reworded and force-pushed.

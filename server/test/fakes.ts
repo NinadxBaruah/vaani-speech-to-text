@@ -1,58 +1,38 @@
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '../src/app.js';
+import type { Repositories, Transcript } from '../src/repositories/types.js';
 import { createEngines } from '../src/services/engines/index.js';
-import type { Repositories, Transcript, Workspace } from '../src/repositories/types.js';
 
-/** In-memory repositories that mirror the Postgres behaviour the routes rely on. */
+/** In-memory repository that mirrors the Postgres behaviour the routes rely on. */
 export function createFakeRepos(): Repositories {
-  const workspaces = new Map<string, Workspace & { keyHash: string }>();
-  const transcripts = new Map<string, Transcript & { workspaceId: string }>();
-  const strip = ({ workspaceId: _w, ...t }: Transcript & { workspaceId: string }): Transcript => t;
+  const rows = new Map<string, Transcript>();
 
   return {
-    workspaces: {
-      async create(keyHash, keyPrefix) {
-        const ws = { id: randomUUID(), keyHash, keyPrefix, createdAt: new Date() };
-        workspaces.set(ws.id, ws);
-        return { id: ws.id, keyPrefix, createdAt: ws.createdAt };
-      },
-      async findByKeyHash(keyHash) {
-        const ws = [...workspaces.values()].find((w) => w.keyHash === keyHash);
-        return ws ? { id: ws.id, keyPrefix: ws.keyPrefix, createdAt: ws.createdAt } : null;
-      },
-    },
     transcripts: {
-      async list(workspaceId, { q, limit, offset }) {
+      async list({ q, limit, offset }) {
         const needle = q?.toLowerCase();
-        const all = [...transcripts.values()]
-          .filter((t) => t.workspaceId === workspaceId)
+        const all = [...rows.values()]
           .filter((t) => !needle || `${t.title} ${t.text}`.toLowerCase().includes(needle))
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-        return { items: all.slice(offset, offset + limit).map(strip), total: all.length };
+        return { items: all.slice(offset, offset + limit), total: all.length };
       },
-      async get(workspaceId, id) {
-        const t = transcripts.get(id);
-        return t && t.workspaceId === workspaceId ? strip(t) : null;
+      async get(id) {
+        return rows.get(id) ?? null;
       },
-      async create(workspaceId, input) {
+      async create(input) {
         const now = new Date();
-        const t = { id: randomUUID(), workspaceId, ...input, createdAt: now, updatedAt: now };
-        transcripts.set(t.id, t);
-        return strip(t);
+        const t = { id: randomUUID(), ...input, createdAt: now, updatedAt: now };
+        rows.set(t.id, t);
+        return t;
       },
-      async update(workspaceId, id, input) {
-        const t = transcripts.get(id);
-        if (!t || t.workspaceId !== workspaceId) return null;
+      async update(id, input) {
+        const t = rows.get(id);
+        if (!t) return null;
         Object.assign(t, input, { updatedAt: new Date() });
-        return strip(t);
+        return t;
       },
-      async delete(workspaceId, id) {
-        const t = transcripts.get(id);
-        if (!t || t.workspaceId !== workspaceId) return false;
-        return transcripts.delete(id);
-      },
-      async count(workspaceId) {
-        return [...transcripts.values()].filter((t) => t.workspaceId === workspaceId).length;
+      async delete(id) {
+        return rows.delete(id);
       },
     },
   };

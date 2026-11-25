@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { transcripts } from '../db/schema.js';
 import type { Transcript, TranscriptRepository } from './types.js';
@@ -22,18 +22,12 @@ function likePattern(q: string): string {
 }
 
 export function createTranscriptRepository(db: Database): TranscriptRepository {
-  const owned = (workspaceId: string, id: string) =>
-    and(eq(transcripts.workspaceId, workspaceId), eq(transcripts.id, id));
-
   return {
-    async list(workspaceId, { q, limit, offset }) {
-      const filters = [eq(transcripts.workspaceId, workspaceId)];
-      if (q) {
-        const pattern = likePattern(q);
-        const search = or(ilike(transcripts.title, pattern), ilike(transcripts.text, pattern));
-        if (search) filters.push(search);
-      }
-      const where = and(...filters);
+    async list({ q, limit, offset }) {
+      const pattern = q ? likePattern(q) : null;
+      const where = pattern
+        ? or(ilike(transcripts.title, pattern), ilike(transcripts.text, pattern))
+        : undefined;
 
       const [items, totals] = await Promise.all([
         db
@@ -48,43 +42,32 @@ export function createTranscriptRepository(db: Database): TranscriptRepository {
       return { items, total: totals[0]?.total ?? 0 };
     },
 
-    async get(workspaceId, id) {
-      const [row] = await db.select(columns).from(transcripts).where(owned(workspaceId, id));
+    async get(id) {
+      const [row] = await db.select(columns).from(transcripts).where(eq(transcripts.id, id));
       return row ?? null;
     },
 
-    async create(workspaceId, input): Promise<Transcript> {
-      const [row] = await db
-        .insert(transcripts)
-        .values({ workspaceId, ...input })
-        .returning(columns);
+    async create(input): Promise<Transcript> {
+      const [row] = await db.insert(transcripts).values(input).returning(columns);
       if (!row) throw new Error('Insert returned no row');
       return row;
     },
 
-    async update(workspaceId, id, input) {
+    async update(id, input) {
       const [row] = await db
         .update(transcripts)
         .set({ ...input, updatedAt: sql`now()` })
-        .where(owned(workspaceId, id))
+        .where(eq(transcripts.id, id))
         .returning(columns);
       return row ?? null;
     },
 
-    async delete(workspaceId, id) {
+    async delete(id) {
       const rows = await db
         .delete(transcripts)
-        .where(owned(workspaceId, id))
+        .where(eq(transcripts.id, id))
         .returning({ id: transcripts.id });
       return rows.length > 0;
-    },
-
-    async count(workspaceId) {
-      const [row] = await db
-        .select({ total: count() })
-        .from(transcripts)
-        .where(eq(transcripts.workspaceId, workspaceId));
-      return row?.total ?? 0;
     },
   };
 }

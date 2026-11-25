@@ -3,7 +3,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { ToastProvider } from './hooks/useToast';
-import { WorkspaceProvider } from './hooks/useWorkspace';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -19,9 +18,7 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <WorkspaceProvider>
-          <App />
-        </WorkspaceProvider>
+        <App />
       </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,

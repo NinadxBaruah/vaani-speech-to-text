@@ -88,9 +88,12 @@ page.on('websocket', (ws) => {
 const step = (s) => console.log(`✓ ${s}`);
 
 await page.goto(BASE);
-await page.locator('.workspace__count').waitFor({ timeout: 15000 });
-step(`workspace created: ${await page.locator('.workspace__label').textContent()}`);
-await page.getByText('Nothing saved yet.').waitFor();
+await page.locator('.history .card__head p').waitFor({ timeout: 15000 });
+step(`history: ${await page.locator('.history .card__head p').textContent()}`);
+
+// The history is shared with everyone, so this run works only with its own uniquely titled item.
+const TITLE = `E2E ${ENGINE} ${Date.now()}`;
+const mine = page.locator('.item', { has: page.locator('.item__title', { hasText: TITLE }) });
 
 // Pick the engine (the radio cards come from /api/meta).
 const engineName = ENGINE === 'local' ? /Whisper Hinglish/ : /Sarvam/;
@@ -99,7 +102,7 @@ await engineRadio.waitFor();
 if (await engineRadio.isDisabled()) throw new Error(`${ENGINE} engine is offline`);
 await engineRadio.check({ force: true });
 step(`engine: ${ENGINE}`);
-await shot(page, '01-empty');
+await shot(page, '01-start');
 
 // Record
 await page.getByRole('button', { name: 'Start recording' }).click();
@@ -117,58 +120,52 @@ if (!transcript.trim()) throw new Error('empty transcript');
 await shot(page, '03-draft');
 
 // Save
-await page.locator('.draft input').fill('Meeting reminder');
+await page.locator('.draft input').fill(TITLE);
 await page.getByRole('button', { name: 'Save transcript' }).click();
 await page.getByText('Transcript saved').waitFor();
-await page.locator('.item__title', { hasText: 'Meeting reminder' }).waitFor();
+await mine.waitFor();
 step('saved + listed');
 await shot(page, '04-saved');
 
 // Edit
-await page.getByRole('button', { name: 'Edit' }).click();
+await mine.getByRole('button', { name: 'Edit' }).click();
 await page.locator('.item--editing textarea').fill(`${transcript} (edited)`);
 await page.getByRole('button', { name: 'Save changes' }).click();
 await page.getByText('Changes saved').waitFor();
-await page.locator('.item__text', { hasText: '(edited)' }).waitFor();
-await page.locator('.tag', { hasText: 'edited' }).waitFor();
+await mine.locator('.item__text', { hasText: '(edited)' }).waitFor();
+await mine.locator('.tag', { hasText: 'edited' }).waitFor();
 step('edited');
 
 // Listen (TTS)
-await page.getByRole('button', { name: 'Listen' }).click();
-await page.getByRole('button', { name: /Stop playback|Listen/ }).waitFor();
+await mine.getByRole('button', { name: 'Listen' }).click();
+await mine.getByRole('button', { name: /Stop playback|Listen/ }).waitFor();
 await page.waitForTimeout(2500);
 const ttsError = await page.locator('.toast--error').count();
 step(`listen (tts errors: ${ttsError})`);
 
 // Search
-await page.getByPlaceholder('Search titles and text').fill('zzzz-nothing');
+await page.getByPlaceholder('Search titles and text').fill('zzzz-nothing-matches-this');
 await page.getByText('No transcripts match').waitFor();
-await page.getByPlaceholder('Search titles and text').fill('meeting');
-await page.locator('.item__title', { hasText: 'Meeting reminder' }).waitFor();
+await page.getByPlaceholder('Search titles and text').fill(TITLE);
+await mine.waitFor();
 step('search');
-
-// Workspace panel
-await page.locator('.workspace__chip').click();
-await page.locator('.workspace__panel').waitFor();
-await shot(page, '05-workspace-panel');
-await page.keyboard.press('Escape');
 
 // Mobile + dark
 await page.setViewportSize({ width: 390, height: 844 });
 await page.emulateMedia({ colorScheme: 'dark' });
+await page.waitForTimeout(300);
 await shot(page, '06-mobile-dark');
 await page.setViewportSize({ width: 1360, height: 900 });
 await page.emulateMedia({ colorScheme: 'light' });
 
-// Delete
-await page.getByPlaceholder('Search titles and text').fill('');
-await page.getByRole('button', { name: 'Delete' }).first().click();
-await page
+// Delete (still filtered to this run's item)
+await mine.getByRole('button', { name: 'Delete' }).click();
+await mine
   .getByRole('group', { name: 'Confirm delete' })
   .getByRole('button', { name: 'Delete' })
   .click();
 await page.getByText('Transcript deleted').waitFor();
-await page.getByText('Nothing saved yet.').waitFor();
+await page.getByText('No transcripts match').waitFor();
 step('deleted');
 
 const types = [...new Set(wsEvents.map((e) => e.type))];

@@ -1,23 +1,11 @@
 import { sql } from 'drizzle-orm';
-import { char, index, integer, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 
-export const workspaces = pgTable('workspaces', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  // SHA-256 hex of the workspace key. The key itself is never stored.
-  keyHash: char('key_hash', { length: 64 }).notNull().unique(),
-  // First characters of the key, safe to show in the UI to identify it.
-  keyPrefix: varchar('key_prefix', { length: 16 }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
-});
-
+/** One shared transcript history: everybody using the site sees the same rows (docs/PLAN.md §5). */
 export const transcripts = pgTable(
   'transcripts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    workspaceId: uuid('workspace_id')
-      .notNull()
-      .references(() => workspaces.id, { onDelete: 'cascade' }),
     title: varchar('title', { length: 200 }).notNull(),
     text: text('text').notNull(),
     languageCode: varchar('language_code', { length: 16 }),
@@ -31,9 +19,8 @@ export const transcripts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('transcripts_workspace_created_idx').on(t.workspaceId, t.createdAt.desc())],
+  (t) => [index('transcripts_created_idx').on(t.createdAt.desc())],
 );
 
-export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type TranscriptRow = typeof transcripts.$inferSelect;
 export type NewTranscriptRow = typeof transcripts.$inferInsert;

@@ -45,13 +45,6 @@ export interface TranscriptPage {
   total: number;
 }
 
-export interface WorkspaceInfo {
-  id: string;
-  keyPrefix: string;
-  createdAt: string;
-  transcriptCount: number;
-}
-
 export interface NewTranscript {
   title?: string;
   text: string;
@@ -75,14 +68,12 @@ export class ApiError extends Error {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
-  key?: string | null;
   signal?: AbortSignal;
 }
 
-async function request(path: string, { method = 'GET', body, key, signal }: RequestOptions = {}) {
+async function request(path: string, { method = 'GET', body, signal }: RequestOptions = {}) {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
-  if (key) headers.authorization = `Bearer ${key}`;
 
   let res: Response;
   try {
@@ -117,25 +108,19 @@ async function json<T>(path: string, options?: RequestOptions): Promise<T> {
 export const api = {
   meta: () => json<Meta>('/meta'),
 
-  createWorkspace: () =>
-    json<{ key: string; workspace: Omit<WorkspaceInfo, 'transcriptCount'> }>('/workspaces', {
-      method: 'POST',
-    }),
-  me: (key: string) => json<WorkspaceInfo>('/workspaces/me', { key }),
-
-  listTranscripts: (key: string, params: { q?: string; limit: number; offset: number }) => {
+  listTranscripts: (params: { q?: string; limit: number; offset: number }) => {
     const qs = new URLSearchParams({ limit: String(params.limit), offset: String(params.offset) });
     if (params.q) qs.set('q', params.q);
-    return json<TranscriptPage>(`/transcripts?${qs}`, { key });
+    return json<TranscriptPage>(`/transcripts?${qs}`);
   },
-  createTranscript: (key: string, body: NewTranscript) =>
-    json<Transcript>('/transcripts', { method: 'POST', key, body }),
-  updateTranscript: (key: string, id: string, body: { title?: string; text?: string }) =>
-    json<Transcript>(`/transcripts/${id}`, { method: 'PATCH', key, body }),
-  deleteTranscript: async (key: string, id: string) => {
-    await request(`/transcripts/${id}`, { method: 'DELETE', key });
+  createTranscript: (body: NewTranscript) =>
+    json<Transcript>('/transcripts', { method: 'POST', body }),
+  updateTranscript: (id: string, body: { title?: string; text?: string }) =>
+    json<Transcript>(`/transcripts/${id}`, { method: 'PATCH', body }),
+  deleteTranscript: async (id: string) => {
+    await request(`/transcripts/${id}`, { method: 'DELETE' });
   },
 
-  speak: async (key: string, body: { text: string; languageCode: string; speaker?: string }) =>
-    (await request('/tts', { method: 'POST', key, body })).blob(),
+  speak: async (body: { text: string; languageCode: string; speaker?: string }) =>
+    (await request('/tts', { method: 'POST', body })).blob(),
 };

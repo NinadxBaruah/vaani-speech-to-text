@@ -52,9 +52,3 @@ export const SearchIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="m20 20-4-4" />
   </svg>
 );
-export const KeyIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...base(p)}>
-    <circle cx="8" cy="15" r="4" />
-    <path d="m11 12 9-9M17 6l3 3" />
-  </svg>
-);

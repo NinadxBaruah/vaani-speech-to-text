@@ -76,11 +76,6 @@ afterEach(async () => {
   await new Promise((r) => fakeSarvam.close(r));
 });
 
-async function newKey(target: FastifyInstance = app): Promise<string> {
-  return (await target.inject({ method: 'POST', url: '/api/workspaces' })).json<{ key: string }>()
-    .key;
-}
-
 function collect(ws: WebSocket) {
   const events: Array<Record<string, unknown>> = [];
   const closed = new Promise<{ code: number }>((resolve) => {
@@ -100,8 +95,7 @@ async function open(url: string, start: Record<string, unknown>) {
 
 describe('live transcription proxy (Sarvam)', () => {
   it('relays audio and transcripts end to end', async () => {
-    const key = await newKey();
-    const { ws, events, closed } = await open(base, { key, languageCode: 'auto', mode: 'codemix' });
+    const { ws, events, closed } = await open(base, { languageCode: 'auto', mode: 'codemix' });
     ws.send(Buffer.alloc(3200)); // may arrive before upstream is open → buffered
     await new Promise((r) => setTimeout(r, 150));
     ws.send(Buffer.alloc(3200));
@@ -127,12 +121,6 @@ describe('live transcription proxy (Sarvam)', () => {
     expect(localCalls).toHaveLength(0);
   });
 
-  it('rejects an invalid workspace key', async () => {
-    const { events, closed } = await open(base, { key: `stt_${'B'.repeat(43)}` });
-    expect((await closed).code).toBe(4401);
-    expect(events[0]).toMatchObject({ type: 'error', fatal: true });
-  });
-
   it('rejects garbage control messages, unknown engines and odd-sized audio', async () => {
     const ws = new WebSocket(base);
     const { closed } = collect(ws);
@@ -140,11 +128,10 @@ describe('live transcription proxy (Sarvam)', () => {
     ws.send('not json');
     expect((await closed).code).toBe(4400);
 
-    const key = await newKey();
-    const bad = await open(base, { key, engine: 'gpt' });
+    const bad = await open(base, { engine: 'gpt' });
     expect((await bad.closed).code).toBe(4400);
 
-    const odd = await open(base, { key });
+    const odd = await open(base, {});
     odd.ws.send(Buffer.alloc(3)); // not PCM16
     expect((await odd.closed).code).toBe(4400);
   });
@@ -164,8 +151,7 @@ function utteranceAudio(): Buffer {
 
 describe('self-hosted engine (Whisper sidecar)', () => {
   it('segments speech and returns the final Hinglish text', async () => {
-    const key = await newKey();
-    const { ws, events, closed } = await open(base, { key, engine: 'local' });
+    const { ws, events, closed } = await open(base, { engine: 'local' });
     const audio = utteranceAudio();
     for (let i = 0; i < audio.length; i += 3200) {
       ws.send(audio.subarray(i, i + 3200));
@@ -196,8 +182,7 @@ describe('self-hosted engine (Whisper sidecar)', () => {
 
   it('fails cleanly when the sidecar is down', async () => {
     localUp = false;
-    const key = await newKey();
-    const { events, closed } = await open(base, { key, engine: 'local' });
+    const { events, closed } = await open(base, { engine: 'local' });
     expect((await closed).code).toBe(4502);
     expect(events[0]).toMatchObject({ type: 'error', fatal: true });
     expect(String(events[0]?.message)).toMatch(/self-hosted/i);
@@ -217,12 +202,8 @@ describe('self-hosted engine (Whisper sidecar)', () => {
     const plain = await buildTestApp();
     await plain.listen({ port: 0, host: '127.0.0.1' });
     try {
-      const key = await newKey(plain);
       const port = (plain.server.address() as AddressInfo).port;
-      const { closed } = await open(`ws://127.0.0.1:${port}/api/transcribe`, {
-        key,
-        engine: 'local',
-      });
+      const { closed } = await open(`ws://127.0.0.1:${port}/api/transcribe`, { engine: 'local' });
       expect((await closed).code).toBe(4503);
       const meta = (await plain.inject('/api/meta')).json<{
         engines: Array<{ id: string; available: boolean }>;

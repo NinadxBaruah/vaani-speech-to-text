@@ -4,7 +4,7 @@
  *   npm run smoke:stt -w server -- "<sentence>" [ttsLanguage] [sttLanguage] [mode]
  *
  * 1. Synthesises the sentence with Sarvam TTS at 16 kHz (so we have real speech to send).
- * 2. Creates a workspace, opens ws://localhost:3000/api/transcribe and streams the audio
+ * 2. Opens ws://localhost:3000/api/transcribe and streams the audio
  *    in real-time 100 ms PCM16 frames, exactly like the browser does.
  * 3. Prints every event and the final transcript; checks UTF-8 round-trips through the REST API.
  */
@@ -70,10 +70,6 @@ async function main() {
   const audio = Buffer.concat([pcm, silence]);
   console.log(`Audio: ${(pcm.length / 32000).toFixed(1)} s of speech`);
 
-  const { key } = (await (await fetch(`${BASE}/api/workspaces`, { method: 'POST' })).json()) as {
-    key: string;
-  };
-
   const finals: string[] = [];
   const detected = new Set<string>();
   const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/api/transcribe`);
@@ -96,7 +92,7 @@ async function main() {
   });
 
   await new Promise((r) => ws.once('open', r));
-  ws.send(JSON.stringify({ type: 'start', key, languageCode: sttLanguage, mode }));
+  ws.send(JSON.stringify({ type: 'start', languageCode: sttLanguage, mode }));
 
   const frame = 3200; // 100 ms of 16 kHz PCM16
   for (let i = 0; i < audio.length; i += frame) {
@@ -116,7 +112,7 @@ async function main() {
   const saved = (await (
     await fetch(`${BASE}/api/transcripts`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         text: text || sentence,
         languageCode: sttLanguage,

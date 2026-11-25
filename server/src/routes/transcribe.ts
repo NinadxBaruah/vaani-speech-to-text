@@ -2,8 +2,6 @@ import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import WebSocket, { type RawData } from 'ws';
 import { z } from 'zod';
 import { STT_LANGUAGE_CODES, STT_MODE_IDS } from '../lib/languages.js';
-import { resolveWorkspace } from '../plugins/auth.js';
-import type { Repositories } from '../repositories/types.js';
 import {
   ENGINE_IDS,
   type EngineEvent,
@@ -21,13 +19,11 @@ import {
 const START_TIMEOUT_MS = 10_000;
 const STOP_TIMEOUT_MS = 40_000; // safety net; engines normally finish much sooner
 const MAX_FRAME_BYTES = 64 * 1024;
-const MAX_EARLY_BYTES = 16_000 * 2 * 5; // audio sent while the key is being checked (≤ 5 s)
 
 /** App-specific close codes (4000-4999 are free for applications). */
 export const CloseCode = {
   normal: 1000,
   badMessage: 4400,
-  unauthorized: 4401,
   startTimeout: 4408,
   upstream: 4502,
   unavailable: 4503,
@@ -36,7 +32,6 @@ export const CloseCode = {
 const ClientMessage = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('start'),
-    key: z.string().max(100),
     engine: z.enum(ENGINE_IDS).default('sarvam'),
     languageCode: z.enum(STT_LANGUAGE_CODES).default('auto'),
     mode: z.enum(STT_MODE_IDS).default('transcribe'),
@@ -48,7 +43,6 @@ type OutgoingEvent =
   EngineEvent | { type: 'ready'; engine: EngineId } | { type: 'ended'; audioDurationS?: number };
 
 export interface TranscribeDeps {
-  repos: Repositories;
   engines: Partial<Record<EngineId, EngineFactory>>;
   maxSessionSeconds: number;
 }
@@ -63,14 +57,12 @@ export async function transcribeRoutes(app: FastifyInstance, deps: TranscribeDep
   );
 }
 
-type State = 'awaiting_start' | 'authenticating' | 'live' | 'stopping' | 'closed';
+type State = 'awaiting_start' | 'live' | 'stopping' | 'closed';
 
 class TranscribeSession {
   private state: State = 'awaiting_start';
   private engine: EngineSession | null = null;
   private timers: NodeJS.Timeout[] = [];
-  private early: Buffer[] = [];
-  private earlyBytes = 0;
 
   constructor(
     private readonly client: WebSocket,
@@ -81,7 +73,7 @@ class TranscribeSession {
   run() {
     this.timers.push(
       setTimeout(() => {
-        if (this.state === 'awaiting_start' || this.state === 'authenticating') {
+        if (this.state === 'awaiting_start') {
           this.fail(CloseCode.startTimeout, 'No start message received in time');
         }
       }, START_TIMEOUT_MS),
@@ -89,7 +81,7 @@ class TranscribeSession {
 
     this.client.on('message', (data, isBinary) => {
       if (isBinary) this.onAudio(data);
-      else void this.onControl(data);
+      else this.onControl(data);
     });
     this.client.on('close', () => this.cleanup());
     this.client.on('error', (err) => {
@@ -119,7 +111,7 @@ class TranscribeSession {
     this.cleanup();
   }
 
-  private async onControl(data: RawData) {
+  private onControl(data: RawData) {
     let parsed: z.infer<typeof ClientMessage>;
     try {
       parsed = ClientMessage.parse(JSON.parse(rawToBuffer(data).toString('utf8')));
@@ -132,17 +124,6 @@ class TranscribeSession {
     if (this.state !== 'awaiting_start') {
       return this.fail(CloseCode.badMessage, 'Session already started');
     }
-    this.state = 'authenticating';
-
-    const workspace = await resolveWorkspace(this.deps.repos.workspaces, parsed.key).catch(
-      (err) => {
-        this.log.error({ err }, 'workspace lookup failed');
-        return null;
-      },
-    );
-    if (this.state !== 'authenticating') return; // client left meanwhile
-    if (!workspace) return this.fail(CloseCode.unauthorized, 'Invalid workspace key');
-
     const factory = this.deps.engines[parsed.engine];
     if (!factory) {
       return this.fail(CloseCode.unavailable, 'That speech engine is not enabled on this server');
@@ -150,7 +131,6 @@ class TranscribeSession {
 
     this.log.info(
       {
-        workspaceId: workspace.id,
         engine: parsed.engine,
         languageCode: parsed.languageCode,
         mode: parsed.mode,
@@ -182,29 +162,20 @@ class TranscribeSession {
       },
       this.log,
     );
-    for (const chunk of this.early) this.engine.pushAudio(chunk);
-    this.early = [];
-    this.earlyBytes = 0;
   }
 
   private onAudio(data: RawData) {
-    if (this.state !== 'live' && this.state !== 'authenticating') return;
+    if (this.state !== 'live') return;
     const chunk = rawToBuffer(data);
     if (chunk.length === 0 || chunk.length > MAX_FRAME_BYTES || chunk.length % 2 !== 0) {
       return this.fail(CloseCode.badMessage, 'Audio frames must be PCM16 and at most 64 KB');
     }
-    if (this.engine) {
-      this.engine.pushAudio(chunk);
-    } else if (this.earlyBytes + chunk.length <= MAX_EARLY_BYTES) {
-      // Still checking the key: hold the audio so the first words aren't lost.
-      this.early.push(chunk);
-      this.earlyBytes += chunk.length;
-    }
+    this.engine?.pushAudio(chunk);
   }
 
   /** Graceful stop: the engine finalises buffered audio, then calls onEnded. */
   private stop() {
-    if (this.state === 'awaiting_start' || this.state === 'authenticating') return this.finish();
+    if (this.state === 'awaiting_start') return this.finish();
     if (this.state !== 'live') return;
     this.state = 'stopping';
     this.timers.push(setTimeout(() => this.finish(), STOP_TIMEOUT_MS));
@@ -222,7 +193,6 @@ class TranscribeSession {
     this.state = 'closed';
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
-    this.early = [];
     this.engine?.close();
     this.engine = null;
   }
