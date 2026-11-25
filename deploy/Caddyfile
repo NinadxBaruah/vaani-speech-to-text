@@ -1,0 +1,5 @@
+{$DOMAIN} {
+	encode zstd gzip
+	# Proxies HTTP and the /api/transcribe WebSocket upgrade to the app.
+	reverse_proxy app:3000
+}

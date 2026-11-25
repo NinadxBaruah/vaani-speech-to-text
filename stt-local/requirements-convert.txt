@@ -1,0 +1,4 @@
+# Build-time only: converts the Hugging Face checkpoint to CTranslate2 int8.
+# torch is installed separately from the CPU-only index (see Dockerfile).
+ctranslate2==4.9.1
+transformers==5.24.1

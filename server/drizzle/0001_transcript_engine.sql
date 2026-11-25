@@ -1,0 +1,1 @@
+ALTER TABLE "transcripts" ADD COLUMN "engine" varchar(16) DEFAULT 'sarvam' NOT NULL;

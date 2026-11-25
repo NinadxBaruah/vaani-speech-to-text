@@ -1,0 +1,52 @@
+# EC2 deployment: the app + the self-hosted Whisper engine + Caddy (automatic HTTPS).
+# HTTPS is required: browsers only allow microphone access on https:// (or localhost).
+#
+#   cd deploy && DOMAIN=stt.example.com docker compose up -d --build
+#
+# No domain? Use the instance's public IP with sslip.io, e.g. DOMAIN=13-228-120-191.sslip.io
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment:
+      NODE_ENV: production
+      LOCAL_STT_URL: http://stt-local:8000
+    restart: unless-stopped
+    depends_on:
+      - stt-local
+    expose:
+      - '3000'
+
+  # Oriserve/Whisper-Hindi2Hinglish-Swift on faster-whisper (CPU, int8).
+  # Internal only: not published to the host or the internet; the app calls it over this network.
+  stt-local:
+    build:
+      context: ../stt-local
+    restart: unless-stopped
+    expose:
+      - '8000'
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN, e.g. 13-228-120-191.sslip.io}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
